@@ -48,7 +48,7 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
           : _images.isEmpty
           ? const Center(child: Text("Поки що немає фото"))
           : GridView.builder(
-        padding: const EdgeInsets.all(8),
+        padding: const .all(8),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           crossAxisSpacing: 4,
@@ -68,7 +68,7 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
             },
             child: Image.file(
               file,
-              fit: BoxFit.cover,
+              fit: .cover,
             ),
           );
         },

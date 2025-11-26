@@ -2,12 +2,13 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
+import 'pages/local_gallery_screen.dart';
 import 'extensions/context_extension.dart';
 import 'services/permission_service.dart';
-import 'pages/local_gallery_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,6 +54,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _missingPermissionsText = '';
 
   File? _lastPhoto;
+  File? _overlayImage;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -72,33 +75,50 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final CameraController? cameraController = _cameraController;
-    if (cameraController == null || !cameraController.value.isInitialized) {
-      if (state == AppLifecycleState.resumed) _updatePermissionStatus();
-      return;
-    }
 
-    if (state == AppLifecycleState.inactive) {
-      cameraController.dispose();
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      cameraController?.dispose();
+
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+          _cameraController = null;
+        });
+      }
     } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+      _updatePermissionStatus();
     }
   }
 
   Future<void> _requestPermissions() async {
     if (_isRequesting) return;
-    setState(() { _isLoading = true; _isRequesting = true; });
+
+    setState(() {
+      _isLoading = true;
+      _isRequesting = true;
+    });
+
     final hasAccess = await _permissionService.requestSequentialPermissions();
     await _updateMissingDescription();
+
     if (!mounted) return;
     if (hasAccess) await _initCamera();
-    setState(() { _hasPermissions = hasAccess; _isLoading = false; _isRequesting = false; });
+
+    setState(() {
+      _hasPermissions = hasAccess;
+      _isLoading = false;
+      _isRequesting = false;
+    });
   }
 
   Future<void> _updatePermissionStatus() async {
     if (_isRequesting) return;
+
     final hasAccess = await _permissionService.checkStatusOnly();
     await _updateMissingDescription();
+
     if (hasAccess && !_isCameraInitialized) await _initCamera();
+
     if (!mounted) return;
     setState(() => _hasPermissions = hasAccess);
   }
@@ -122,13 +142,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
       final camera = _cameras[_selectedCameraIndex];
 
-      _cameraController = CameraController(
+      final newController = CameraController(
         camera,
-        ResolutionPreset.high,
+        ResolutionPreset.ultraHigh,
         enableAudio: true,
       );
 
-      await _cameraController!.initialize();
+      _cameraController = newController;
+
+      await newController.initialize();
 
       if (!mounted) return;
       setState(() => _isCameraInitialized = true);
@@ -138,7 +160,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  // --- ЛОГІКА ПЕРЕМИКАННЯ КАМЕР ---
   Future<void> _switchCamera() async {
     if (_cameras.length < 2) return;
 
@@ -153,13 +174,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _loadLastPhoto() async {
     final dir = await getApplicationDocumentsDirectory();
     final List<FileSystemEntity> entities = dir.listSync();
-
     final files = entities.whereType<File>().where((file) {
       return file.path.endsWith('.jpg');
     }).toList();
 
     if (files.isNotEmpty) {
       files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+
       setState(() {
         _lastPhoto = files.first;
       });
@@ -168,6 +189,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _takePicture() async {
     final CameraController? cameraController = _cameraController;
+
     if (cameraController == null || !cameraController.value.isInitialized) return;
     if (cameraController.value.isTakingPicture) return;
 
@@ -185,6 +207,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint("Error taking picture: $e");
     }
+  }
+
+  Future<void> _pickOverlayImage() async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(source: .gallery);
+
+      if (pickedFile != null) {
+        setState(() {
+          _overlayImage = File(pickedFile.path);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error picking overlay: $e");
+    }
+  }
+
+  void _removeOverlay() {
+    setState(() {
+      _overlayImage = null;
+    });
   }
 
   void _openGallery() {
@@ -209,94 +251,171 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Widget _buildBodyContent(BuildContext context) {
     if (_isLoading) {
-      return Center(child: CircularProgressIndicator(color: context.colors.primary));
+      return Center(
+        child: CircularProgressIndicator(
+          color: context.colors.primary,
+        ),
+      );
     }
 
-    if (!_hasPermissions) {
-      return Center(child: Text("Немає дозволів: $_missingPermissionsText"));
-    }
+    if (_hasPermissions) {
+      return Stack(
+        children: [
+          if (_isCameraInitialized && _cameraController != null)
+            SizedBox.expand(
+              child: CameraPreview(_cameraController!),
+            )
+          else
+            const Center(child: CircularProgressIndicator()),
 
-    return Stack(
-      children: [
-        if (_isCameraInitialized && _cameraController != null)
-          SizedBox.expand(
-            child: CameraPreview(_cameraController!),
-          )
-        else
-          const Center(child: CircularProgressIndicator()),
-
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: Container(
-            color: Colors.black45,
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                GestureDetector(
-                  onTap: _openGallery,
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[800],
-                      borderRadius: BorderRadius.circular(8),
-                      image: _lastPhoto != null
-                          ? DecorationImage(
-                        image: FileImage(_lastPhoto!),
-                        fit: BoxFit.cover,
-                      )
-                          : null,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: _lastPhoto == null
-                        ? const Icon(Icons.photo_library, color: Colors.white)
-                        : null,
-                  ),
+          if (_overlayImage != null)
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.2,
+                child: Image.file(
+                  _overlayImage!,
+                  fit: .cover,
                 ),
+              ),
+            ),
 
-                GestureDetector(
-                  onTap: _takePicture,
-                  child: Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      border: Border.all(color: Colors.grey, width: 4),
+          Align(
+            alignment: .bottomCenter,
+            child: Container(
+              color: Colors.black45,
+              padding: const .symmetric(vertical: 20, horizontal: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: .spaceEvenly,
+                      children: [
+                        IconButton(
+                          onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
+                          icon: Icon(
+                            _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+
+                        if (_cameras.length > 1)
+                          IconButton(
+                            onPressed: _switchCamera,
+                            icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 30),
+                          )
+                        else
+                          const SizedBox(width: 30),
+                      ],
                     ),
-                    child: Center(
-                      child: Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: context.colors.primary,
+                  ),
+                  GestureDetector(
+                    onTap: _takePicture,
+                    child: Container(
+                      width: 70,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        shape: .circle,
+                        color: Colors.white,
+                        border: .all(color: Colors.grey, width: 4),
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            shape: .circle,
+                            color: context.colors.error,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
 
-                SizedBox(
-                  width: 50,
-                  height: 50,
-                  child: _cameras.length > 1
-                      ? IconButton(
-                    onPressed: _switchCamera,
-                    icon: const Icon(
-                        Icons.flip_camera_ios,
-                        color: Colors.white,
-                        size: 30
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: .center,
+                      children: [
+                        GestureDetector(
+                          onTap: _openGallery,
+                          child: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[800],
+                              borderRadius: .circular(8),
+                              image: _lastPhoto != null
+                                  ? DecorationImage(
+                                image: FileImage(_lastPhoto!),
+                                fit: .cover,
+                              )
+                                  : null,
+                              border: .all(color: Colors.white, width: 2),
+                            ),
+                            child: _lastPhoto == null
+                                ? const Icon(Icons.photo_library, color: Colors.white)
+                                : null,
+                          ),
+                        ),
+                      ],
                     ),
-                  )
-                      : const SizedBox(),
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
+        ],
+      );
+    }
+    else {
+      return SizedBox(
+        width: double.infinity,
+        height: double.infinity,
+        child: Column(
+          mainAxisAlignment: .center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              color: context.colors.error,
+              size: 64,
+            ),
+            Container(
+              width: 0.8 * context.width,
+              margin: const .only(
+                top: 16,
+                bottom: 24,
+              ),
+              child: Text.rich(
+                TextSpan(
+                  text: 'Для роботи додатку потрібен доступ до: ',
+                  style: context.text.bodyLarge,
+                  children: [
+                    TextSpan(
+                      text: _missingPermissionsText,
+                      style: context.text.bodyLarge?.copyWith(
+                        fontWeight: .bold,
+                        color: context.colors.error,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '.',
+                      style: context.text.bodyLarge,
+                    ),
+                  ],
+                ),
+                textAlign: .center,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                await _permissionService.openSettings();
+              },
+              icon: const Icon(Icons.settings),
+              label: const Text('Відкрити налаштування'),
+            ),
+          ],
         ),
-      ],
-    );
+      );
+    }
   }
 }
