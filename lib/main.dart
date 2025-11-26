@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'extensions/context_extension.dart';
+
 void main() {
   runApp(const CameraTestApp());
 }
@@ -38,11 +40,11 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: context.colors.inversePrimary,
         centerTitle: true,
         title: Text(
           widget.title,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+          style: context.text.titleLarge?.copyWith(
             fontWeight: .w600,
           ),
         ),
@@ -53,7 +55,7 @@ class _HomePageState extends State<HomePage> {
           children: [
             Text(
               'Main Content',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              style: context.text.titleLarge?.copyWith(
                 fontWeight: .w500,
               ),
             ),
