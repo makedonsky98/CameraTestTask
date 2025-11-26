@@ -28,6 +28,14 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
+	<key>NSCameraUsageDescription</key>
+    <string>Ми використовуємо камеру для зйомки фото та відео.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Мікрофон потрібен для запису звуку у відео.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Нам потрібен доступ до галереї, щоб завантажувати оверлеї та зберігати результати.</string>
+
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
