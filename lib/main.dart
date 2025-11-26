@@ -1,9 +1,12 @@
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+//import 'package:flutter/services.dart';
 
 import 'extensions/context_extension.dart';
 import 'services/permission_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const CameraTestApp());
 }
 
@@ -41,10 +44,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final PermissionService _permissionService = PermissionService();
 
+  CameraController? _cameraController;
+  bool _isCameraInitialized = false;
+
   bool _hasPermissions = false;
   bool _isLoading = true;
   bool _isRequesting = false;
-
   String _missingPermissionsText = '';
 
   @override
@@ -57,12 +62,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cameraController?.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    final CameraController? cameraController = _cameraController;
+
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      if (state == AppLifecycleState.resumed) {
+        _updatePermissionStatus();
+      }
+
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      // Камеру краще зупиняти/звільняти, коли додаток неактивний,
+      // але для простоти поки залишимо dispose при виході.
+      // В складніших кейсах тут роблять controller.dispose()
+    } else if (state == AppLifecycleState.resumed) {
       _updatePermissionStatus();
     }
   }
@@ -80,6 +100,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     if (!mounted) return;
 
+    if (hasAccess) {
+      await _initCamera();
+    }
+
     setState(() {
       _hasPermissions = hasAccess;
       _isLoading = false;
@@ -93,11 +117,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final hasAccess = await _permissionService.checkStatusOnly();
     await _updateMissingDescription();
 
+    if (hasAccess && !_isCameraInitialized) {
+      await _initCamera();
+    }
+
     if (!mounted) return;
 
     setState(() {
       _hasPermissions = hasAccess;
     });
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) return;
+
+      final firstCamera = cameras.first;
+
+      _cameraController = CameraController(
+        firstCamera,
+        ResolutionPreset.ultraHigh,
+        enableAudio: true,
+      );
+
+      await _cameraController!.initialize();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isCameraInitialized = true;
+      });
+
+    } catch (e) {
+      debugPrint("Camera error: $e");
+    }
   }
 
   Future<void> _updateMissingDescription() async {
@@ -123,80 +177,78 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ),
       ),
-      body: Center(
-        child: _buildBodyContent(),
-      ),
+      body: _buildBodyContent(context),
     );
   }
 
-  Widget _buildBodyContent() {
+  Widget _buildBodyContent(BuildContext context) {
     if (_isLoading) {
-      return const CircularProgressIndicator();
+      return Center(
+        child: CircularProgressIndicator(
+          color: context.colors.primary,
+        ),
+      );
     }
 
     if (_hasPermissions) {
-      return Column(
-        mainAxisAlignment: .center,
-        children: [
-          Icon(
-            Icons.check_circle,
+      if (_isCameraInitialized && _cameraController != null) {
+        return SizedBox.expand(
+          child: CameraPreview(_cameraController!),
+        );
+      } else {
+        return Center(
+          child: CircularProgressIndicator(
             color: context.colors.primary,
-            size: 64,
           ),
-          Container(
-            width: 0.8 * context.width,
-            margin: const .only(top: 16),
-            child: Text(
-              'Всі дозволи надано',
-              textAlign: .center,
-              style: context.text.titleLarge,
-            ),
-          ),
-        ],
-      );
+        );
+      }
     } else {
-      return Column(
-        mainAxisAlignment: .center,
-        children: [
-          Icon(
-            Icons.error_outline,
-            color: context.colors.error,
-            size: 64,
-          ),
-          Container(
-            width: 0.8 * context.width,
-            margin: const .only(
-              top: 16,
-              bottom: 24,
+      return SizedBox(
+        width: double.infinity,
+        height: double.infinity,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              color: context.colors.error,
+              size: 64,
             ),
-            child: Text.rich(
-              TextSpan(
-                text: 'Для роботи додатку потрібен доступ до: ',
-                style: context.text.bodyLarge,
-                children: [
-                  TextSpan(
-                    text: _missingPermissionsText,
-                    style: context.text.bodyLarge?.copyWith(
-                      fontWeight: .w600,
-                    ),
-                  ),
-                  TextSpan(
-                    text: '.',
-                    style: context.text.bodyLarge,
-                  ),
-                ],
+            Container(
+              width: 0.8 * context.width,
+              margin: const .only(
+                top: 16,
+                bottom: 24,
               ),
-              textAlign: TextAlign.center,
+              child: Text.rich(
+                TextSpan(
+                  text: 'Для роботи додатку потрібен доступ до: ',
+                  style: context.text.bodyLarge,
+                  children: [
+                    TextSpan(
+                      text: _missingPermissionsText,
+                      style: context.text.bodyLarge?.copyWith(
+                        fontWeight: .w600,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '.',
+                      style: context.text.bodyLarge,
+                    ),
+                  ],
+                ),
+                textAlign: .center,
+              ),
             ),
-          ),
-          ElevatedButton.icon(
-            onPressed: () async {
-              await _permissionService.openSettings();
-            },
-            icon: const Icon(Icons.settings),
-            label: const Text('Відкрити налаштування'),
-          ),
-        ],
+            ElevatedButton.icon(
+              onPressed: () async {
+                await _permissionService.openSettings();
+              },
+              icon: const Icon(Icons.settings),
+              label: const Text('Відкрити налаштування'),
+            ),
+          ],
+        ),
       );
     }
   }
