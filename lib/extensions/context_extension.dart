@@ -16,6 +16,8 @@ extension BuildContextExtensions on BuildContext {
 
   NavigatorState get navigator => Navigator.of(this);
 
+  bool canPop() => navigator.canPop();
+
   Future<T?> push<T>(Widget page) {
     return navigator.push(
       MaterialPageRoute(builder: (_) => page),
