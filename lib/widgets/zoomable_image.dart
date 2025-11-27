@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:vector_math/vector_math_64.dart' as vector;
 
 import '../extensions/context_extension.dart';
 
@@ -64,15 +65,20 @@ class _ZoomableImageState extends State<ZoomableImage> with SingleTickerProvider
 
   void _handleDoubleTap() {
     Matrix4 endMatrix;
+    const double scale = 3.0;
     Offset position = _doubleTapDetails?.localPosition ?? Offset.zero;
 
     if (_transformationController.value != Matrix4.identity()) {
       endMatrix = Matrix4.identity();
       widget.onZoomStateChanged(false);
     } else {
+      final double tx = -position.dx * (scale - 1);
+      final double ty = -position.dy * (scale - 1);
+
       endMatrix = Matrix4.identity()
-        ..translate(-position.dx * 2, -position.dy * 2)
-        ..scale(3.0);
+        ..translateByVector3(vector.Vector3(tx, ty, 0.0))
+        ..scaleByVector3(vector.Vector3(scale, scale, 1.0));
+
       widget.onZoomStateChanged(true);
     }
 
