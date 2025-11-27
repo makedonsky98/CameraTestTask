@@ -218,11 +218,33 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
     }
   }
 
-  /// Логіка шерингу фото
-  Future<void> _sharePhoto() async {
-    final file = _currentImages[_currentIndex];
-    await Share.shareXFiles([XFile(file.path)]);
+  /// Логіка універсального шерингу
+  Future<void> _shareContent({
+    required XFile file,
+    String? text,
+    String? subject,
+  }) async {
+    final result = await SharePlus.instance.share(
+      ShareParams(
+        files: [file],
+        text: text,
+        subject: subject,
+      ),
+    );
+
+    switch (result.status) {
+      case ShareResultStatus.success:
+        debugPrint('Користувач вибрав дію для шерингу');
+        break;
+      case ShareResultStatus.dismissed:
+        debugPrint('Користувач закрив без вибору');
+        break;
+      case ShareResultStatus.unavailable:
+        debugPrint('Шеринг недоступний');
+        break;
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -293,7 +315,12 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
             mainAxisAlignment: .spaceAround,
             children: [
               IconButton(
-                onPressed: _sharePhoto,
+                onPressed: () async {
+                  final file = _currentImages[_currentIndex];
+                  await _shareContent(
+                    file: XFile(file.path),
+                  );
+                },
                 icon: const Icon(Icons.share, color: Colors.white, size: 30),
                 tooltip: 'Поділитися',
               ),
