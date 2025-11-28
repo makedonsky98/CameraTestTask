@@ -100,6 +100,7 @@ class _ZoomableImageState extends State<ZoomableImage> with SingleTickerProvider
           transformationController: _transformationController,
           minScale: 1.0,
           maxScale: 4.0,
+          clipBehavior: .none,
           onInteractionUpdate: (details) {
             final double scale = _transformationController.value.row0.x;
 
