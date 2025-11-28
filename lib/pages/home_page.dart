@@ -241,6 +241,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildBodyContent(BuildContext context) {
+    final shootingButtonSize = 72.0;
+    final controlPanelHeight = 48.0;
+    final controlPanelPaddingBottom = 32.0;
+    final controlPanelPaddingHorizontal = 16.0;
+    final controlButtonsSize = 32.0;
+
     if (_isLoading) {
       return Center(
         child: CircularProgressIndicator(
@@ -283,97 +289,123 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
 
           Align(
-            alignment: .bottomCenter,
-            child: Container(
-              color: Colors.black45,
-              padding: const .symmetric(vertical: 20, horizontal: 10),
-              child: Row(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              child: Stack(
                 children: [
-                  Expanded(
-                    child: Row(
-                      mainAxisAlignment: .spaceEvenly,
-                      children: [
-                        IconButton(
-                          onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
-                          icon: Icon(
-                            _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
-                            color: Colors.white,
-                            size: 30,
-                          ),
-                        ),
-
-                        if (_cameras.length > 1)
-                          IconButton(
-                            onPressed: _switchCamera,
-                            icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 30),
-                          )
-                        else
-                          const SizedBox(width: 30),
-                      ],
-                    ),
-                  ),
-
-                  // Кнопка ЗРОБИТИ ФОТО з анімацією
-                  GestureDetector(
-                    onTapDown: (_) => setState(() => _isShootingButtonDown = true),
-                    onTapUp: (_) => setState(() => _isShootingButtonDown = false),
-                    onTapCancel: () => setState(() => _isShootingButtonDown = false),
-                    onTap: _takePicture,
-                    child: AnimatedScale(
-                      scale: _isShootingButtonDown ? 0.95 : 1.0,
-                      duration: const Duration(milliseconds: 100),
-                      curve: Curves.easeInOut,
-                      child: Container(
-                        width: 70,
-                        height: 70,
-                        decoration: BoxDecoration(
-                          shape: .circle,
-                          color: Colors.white,
-                          border: .all(color: Colors.grey, width: 4),
-                        ),
-                        child: Center(
-                          child: Container(
-                            width: 56,
-                            height: 56,
-                            decoration: BoxDecoration(
-                              shape: .circle,
-                              color: context.colors.error,
+                  Align(
+                    alignment: .bottomCenter,
+                    child: Container(
+                      height: controlPanelHeight,
+                      margin: .only(
+                        top: 0,
+                        bottom: controlPanelPaddingBottom,
+                        left: controlPanelPaddingHorizontal,
+                        right: controlPanelPaddingHorizontal,
+                      ),
+                      padding: const .symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        borderRadius: .circular(controlPanelHeight / 2),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                IconButton(
+                                  onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
+                                  icon: Icon(
+                                    _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
+                                    color: Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                ),
+                                if (_cameras.length > 1)
+                                  IconButton(
+                                    onPressed: _switchCamera,
+                                    icon: Icon(
+                                      Icons.flip_camera_ios,
+                                      color: Colors.white,
+                                      size: controlButtonsSize,
+                                    ),
+                                  )
+                                else
+                                  SizedBox(width: controlButtonsSize),
+                              ],
                             ),
                           ),
-                        ),
+
+                          SizedBox(width: shootingButtonSize),
+
+                          Expanded(
+                            child: Row(
+                              mainAxisAlignment: .spaceEvenly,
+                              children: [
+                                IconButton(
+                                  onPressed: () {},
+                                  icon: Icon(
+                                    Icons.video_camera_back,
+                                    color: Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: _openGallery,
+                                  child: _lastPhoto == null
+                                      ? Icon(Icons.photo_library, color: Colors.white, size: controlButtonsSize)
+                                      : Container(
+                                    width: controlButtonsSize,
+                                    height: controlButtonsSize,
+                                    decoration: BoxDecoration(
+                                      borderRadius: .circular(8),
+                                      image: DecorationImage(
+                                        image: ResizeImage(
+                                          FileImage(_lastPhoto!),
+                                          width: (controlButtonsSize * 3).toInt(),
+                                        ),
+                                        fit: .cover,
+                                      ),
+                                      border: .all(color: Colors.white, width: 2),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
 
-                  Expanded(
-                    child: Row(
-                      mainAxisAlignment: .center,
-                      children: [
-                        GestureDetector(
-                          onTap: _openGallery,
+                  Align(
+                    alignment: .bottomCenter,
+                    child: Padding(
+                      padding: .only(
+                          bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
+                      ),
+                      child: GestureDetector(
+                        onTapDown: (_) => setState(() => _isShootingButtonDown = true),
+                        onTapUp: (_) => setState(() => _isShootingButtonDown = false),
+                        onTapCancel: () => setState(() => _isShootingButtonDown = false),
+                        onTap: _takePicture,
+                        child: AnimatedScale(
+                          scale: _isShootingButtonDown ? 0.95 : 1.0,
+                          duration: const Duration(milliseconds: 100),
+                          curve: Curves.easeInOut,
                           child: Container(
-                            width: 50,
-                            height: 50,
+                            width: shootingButtonSize,
+                            height: shootingButtonSize,
                             decoration: BoxDecoration(
-                              color: Colors.grey[800],
-                              borderRadius: .circular(8),
-                              image: _lastPhoto != null
-                                  ? DecorationImage(
-                                image: ResizeImage(
-                                  FileImage(_lastPhoto!),
-                                  width: 150,
-                                ),
-                                fit: BoxFit.cover,
-                              )
-                                  : null,
-                              border: .all(color: Colors.white, width: 2),
+                              shape: .circle,
+                              color: context.colors.error,
+                              border: .all(color: context.colors.onError, width: 3),
                             ),
-                            child: _lastPhoto == null
-                                ? const Icon(Icons.photo_library, color: Colors.white)
-                                : null,
+                            child: null,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ],
@@ -409,7 +441,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     TextSpan(
                       text: _missingPermissionsText,
                       style: context.text.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+                        fontWeight: .bold,
                         color: context.colors.error,
                       ),
                     ),

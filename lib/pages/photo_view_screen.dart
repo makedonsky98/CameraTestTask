@@ -218,7 +218,6 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
     }
   }
 
-  /// Логіка універсального шерингу
   Future<void> _shareContent({
     required XFile file,
     String? text,
