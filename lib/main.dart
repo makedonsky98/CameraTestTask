@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
-void main() {
+import '/pages/camera_screen.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const CameraTestApp());
 }
 
@@ -14,52 +17,10 @@ class CameraTestApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: Colors.blueAccent),
+        fontFamily: 'Inter',
+        useMaterial3: true,
       ),
-      home: const HomePage(title: 'Camera Test Task'),
-    );
-  }
-}
-
-class HomePage extends StatefulWidget {
-  const HomePage({
-    super.key,
-    required this.title
-  });
-
-  final String title;
-
-  @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        centerTitle: true,
-        title: Text(
-          widget.title,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: .w600,
-          ),
-        ),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: .center,
-          children: [
-            Text(
-              'Main Content',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: .w500,
-              ),
-            ),
-          ],
-        ),
-      ),
+      home: const CameraScreen(title: 'Camera Test'),
     );
   }
 }
