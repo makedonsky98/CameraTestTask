@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui'; // Для FontFeature
 
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide ImageFormat;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 import 'local_gallery_screen.dart';
 import '../extensions/context_extension.dart';
@@ -33,11 +37,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   String _missingPermissionsText = '';
 
   File? _lastPhoto;
+  Uint8List? _lastVideoThumbnail;
+
   File? _overlayImage;
   final ImagePicker _picker = ImagePicker();
 
   bool _isShootingButtonDown = false;
   bool _showFlashEffect = false;
+
+  // --- ЗМІННІ ДЛЯ ТАЙМЕРА ---
+  Timer? _videoTimer;
+  int _recordDuration = 0;
+  bool _isRedDotVisible = true;
 
   @override
   void initState() {
@@ -50,6 +61,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopTimer();
     _cameraService.dispose();
     super.dispose();
   }
@@ -57,6 +69,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      _stopTimer();
       _cameraService.dispose().then((_) {
         if (mounted) {
           setState(() {
@@ -66,6 +79,61 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       });
     } else if (state == AppLifecycleState.resumed) {
       _updatePermissionStatus();
+    }
+  }
+
+  // --- МЕТОДИ ТАЙМЕРА ---
+  void _startTimer() {
+    _videoTimer?.cancel();
+    _videoTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (mounted) {
+        setState(() {
+          _isRedDotVisible = !_isRedDotVisible;
+          if (!_cameraService.isRecordingPaused && timer.tick % 2 == 0) {
+            _recordDuration++;
+          }
+        });
+      }
+    });
+  }
+
+  void _stopTimer() {
+    _videoTimer?.cancel();
+    _videoTimer = null;
+    _recordDuration = 0;
+    _isRedDotVisible = true;
+  }
+
+  String _formatDuration(int seconds) {
+    final int minutes = seconds ~/ 60;
+    final int remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _updateLastMediaPreview(File file) async {
+    final isVideo = file.path.endsWith('.mp4');
+
+    if (isVideo) {
+      final uint8list = await VideoThumbnail.thumbnailData(
+        video: file.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 200,
+        quality: 75,
+      );
+
+      if (mounted) {
+        setState(() {
+          _lastPhoto = file;
+          _lastVideoThumbnail = uint8list;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _lastPhoto = file;
+          _lastVideoThumbnail = null;
+        });
+      }
     }
   }
 
@@ -125,7 +193,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _switchCamera() async {
-    // Перевірка на наявність камер тепер через сервіс
     if (_cameraService.cameraCount < 2) return;
 
     setState(() {
@@ -145,7 +212,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   Future<void> _takePicture() async {
     if (!_cameraService.isInitialized) return;
 
-    // UI ефект спалаху
     setState(() {
       _showFlashEffect = true;
     });
@@ -161,24 +227,21 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final File? photo = await _cameraService.takePicture();
 
     if (photo != null && mounted) {
-      setState(() {
-        _lastPhoto = photo;
-      });
+      await _updateLastMediaPreview(photo);
     }
   }
 
   Future<void> _loadLastPhoto() async {
     final dir = await getApplicationDocumentsDirectory();
     final List<FileSystemEntity> entities = dir.listSync();
+
     final files = entities.whereType<File>().where((file) {
-      return file.path.endsWith('.jpg');
+      return file.path.endsWith('.jpg') || file.path.endsWith('.mp4');
     }).toList();
 
     if (files.isNotEmpty) {
       files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
-      setState(() {
-        _lastPhoto = files.first;
-      });
+      await _updateLastMediaPreview(files.first);
     }
   }
 
@@ -203,6 +266,43 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     context.push(
       const LocalGalleryScreen(),
     ).then((_) => _loadLastPhoto());
+  }
+
+  Future<void> _startVideoRecording() async {
+    if (!_cameraService.isInitialized) return;
+    if (_cameraService.isRecordingVideo) return;
+
+    _recordDuration = 0;
+    _startTimer();
+
+    await _cameraService.startVideoRecording();
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _stopVideoRecording() async {
+    if (!_cameraService.isRecordingVideo) return;
+
+    _stopTimer();
+
+    final File? videoFile = await _cameraService.stopVideoRecording();
+
+    if (mounted && videoFile != null) {
+      await _updateLastMediaPreview(videoFile);
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _togglePauseVideo() async {
+    if (!_cameraService.isRecordingVideo) return;
+
+    if (_cameraService.isRecordingPaused) {
+      await _cameraService.resumeVideoRecording();
+    } else {
+      await _cameraService.pauseVideoRecording();
+    }
+
+    if (mounted) setState(() {});
   }
 
   @override
@@ -248,7 +348,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                 opacity: 0.2,
                 child: Image.file(
                   _overlayImage!,
-                  fit: .cover,
+                  fit: BoxFit.cover,
                 ),
               ),
             ),
@@ -287,23 +387,56 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                       ),
                       child: Row(
                         children: [
+                          // --- ЛІВА ЧАСТИНА ---
                           Expanded(
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
-                                IconButton(
-                                  onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
-                                  icon: Icon(
-                                    _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
-                                    color: Colors.white,
-                                    size: controlButtonsSize,
-                                  ),
-                                ),
-                                if (_cameraService.cameraCount > 1)
+                                // Слот 1: ТАЙМЕР або ЗМІНА КАМЕРИ
+                                if (_cameraService.isRecordingVideo)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 10,
+                                        height: 10,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: (_isRedDotVisible && !_cameraService.isRecordingPaused)
+                                              ? Colors.red
+                                              : Colors.transparent,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatDuration(_recordDuration),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                          fontFeatures: [FontFeature.tabularFigures()],
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else if (_cameraService.cameraCount > 1)
                                   IconButton(
                                     onPressed: _switchCamera,
                                     icon: Icon(
                                       Icons.flip_camera_ios,
+                                      color: Colors.white,
+                                      size: controlButtonsSize,
+                                    ),
+                                  )
+                                else
+                                  SizedBox(width: controlButtonsSize),
+
+                                // Слот 2: ОВЕРЛЕЙ (логіка: доступний завжди, окрім запису БЕЗ оверлею)
+                                if (!_cameraService.isRecordingVideo || _overlayImage != null)
+                                  IconButton(
+                                    onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
+                                    icon: Icon(
+                                      _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
                                       color: Colors.white,
                                       size: controlButtonsSize,
                                     ),
@@ -316,35 +449,56 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
                           SizedBox(width: shootingButtonSize),
 
+                          // --- ПРАВА ЧАСТИНА ---
                           Expanded(
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
+                                // 1. Кнопка Відео/Стоп
                                 IconButton(
-                                  onPressed: () {},
+                                  onPressed: _cameraService.isRecordingVideo
+                                      ? _stopVideoRecording
+                                      : _startVideoRecording,
                                   icon: Icon(
-                                    Icons.video_camera_back,
+                                    _cameraService.isRecordingVideo
+                                        ? Icons.stop_rounded
+                                        : Icons.videocam,
                                     color: Colors.white,
                                     size: controlButtonsSize,
                                   ),
                                 ),
+
+                                // 2. Галерея (Відображається завжди, але недоступна при записі)
                                 GestureDetector(
-                                  onTap: _openGallery,
-                                  child: _lastPhoto == null
-                                      ? Icon(Icons.photo_library, color: Colors.white, size: controlButtonsSize)
-                                      : Container(
-                                    width: controlButtonsSize,
-                                    height: controlButtonsSize,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(8),
-                                      image: DecorationImage(
-                                        image: ResizeImage(
-                                          FileImage(_lastPhoto!),
-                                          width: (controlButtonsSize * 3).toInt(),
+                                  // Блокуємо натискання під час запису
+                                  onTap: _cameraService.isRecordingVideo ? null : _openGallery,
+                                  child: Opacity(
+                                    // Робимо напівпрозорою під час запису
+                                    opacity: _cameraService.isRecordingVideo ? 0.5 : 1.0,
+                                    child: _lastPhoto == null
+                                        ? Icon(Icons.photo_library, color: Colors.white, size: controlButtonsSize)
+                                        : Container(
+                                      width: controlButtonsSize,
+                                      height: controlButtonsSize,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.white, width: 2),
+                                        image: DecorationImage(
+                                          image: _lastVideoThumbnail != null
+                                              ? MemoryImage(_lastVideoThumbnail!) as ImageProvider
+                                              : ResizeImage(
+                                            FileImage(_lastPhoto!),
+                                            width: (controlButtonsSize * 3).toInt(),
+                                          ),
+                                          fit: BoxFit.cover,
                                         ),
-                                        fit: BoxFit.cover,
                                       ),
-                                      border: Border.all(color: Colors.white, width: 2),
+                                      child: _lastVideoThumbnail != null
+                                          ? const Center(
+                                        child: Icon(Icons.play_arrow_rounded,
+                                            color: Colors.white70, size: 20),
+                                      )
+                                          : null,
                                     ),
                                   ),
                                 ),
@@ -363,10 +517,25 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                         bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
                       ),
                       child: GestureDetector(
-                        onTapDown: (_) => setState(() => _isShootingButtonDown = true),
-                        onTapUp: (_) => setState(() => _isShootingButtonDown = false),
-                        onTapCancel: () => setState(() => _isShootingButtonDown = false),
-                        onTap: _takePicture,
+                        onTapDown: (_) {
+                          if (!_cameraService.isRecordingVideo) {
+                            setState(() => _isShootingButtonDown = true);
+                          }
+                        },
+                        onTapUp: (_) {
+                          if (!_cameraService.isRecordingVideo) {
+                            setState(() => _isShootingButtonDown = false);
+                          }
+                        },
+                        onTapCancel: () {
+                          if (!_cameraService.isRecordingVideo) {
+                            setState(() => _isShootingButtonDown = false);
+                          }
+                        },
+                        onTap: _cameraService.isRecordingVideo
+                            ? _togglePauseVideo
+                            : _takePicture,
+
                         child: AnimatedScale(
                           scale: _isShootingButtonDown ? 0.95 : 1.0,
                           duration: const Duration(milliseconds: 100),
@@ -376,8 +545,26 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                             height: shootingButtonSize,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: context.colors.error,
-                              border: Border.all(color: context.colors.onError, width: 3),
+                              color: _cameraService.isRecordingVideo
+                                  ? Colors.white
+                                  : context.colors.error,
+                              border: Border.all(
+                                  color: _cameraService.isRecordingVideo
+                                      ? Colors.white
+                                      : context.colors.onError,
+                                  width: 3
+                              ),
+                            ),
+                            child: Center(
+                              child: _cameraService.isRecordingVideo
+                                  ? Icon(
+                                _cameraService.isRecordingPaused
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.pause_rounded,
+                                color: Colors.black,
+                                size: shootingButtonSize / 2,
+                              )
+                                  : null,
                             ),
                           ),
                         ),

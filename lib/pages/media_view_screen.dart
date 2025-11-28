@@ -3,25 +3,27 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 
 import '../extensions/context_extension.dart';
+import '../widgets/video_player_item.dart';
 import '../widgets/zoomable_image.dart';
 
-class PhotoViewScreen extends StatefulWidget {
+class MediaViewScreen extends StatefulWidget {
   final List<File> images;
   final int initialIndex;
 
-  const PhotoViewScreen({
+  const MediaViewScreen({
     super.key,
     required this.images,
     required this.initialIndex,
   });
 
   @override
-  State<PhotoViewScreen> createState() => _PhotoViewScreenState();
+  State<MediaViewScreen> createState() => _MediaViewScreenState();
 }
 
-class _PhotoViewScreenState extends State<PhotoViewScreen> {
+class _MediaViewScreenState extends State<MediaViewScreen> {
   late PageController _pageController;
   late int _currentIndex;
   late List<File> _currentImages;
@@ -41,6 +43,10 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
     super.dispose();
   }
 
+  bool _isVideo(File file) {
+    return file.path.toLowerCase().endsWith('.mp4');
+  }
+
   String _formatFileSize(int bytes) {
     if (bytes < 1024) {
       return "$bytes B";
@@ -57,52 +63,93 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
         "${twoDigits(date.hour)}:${twoDigits(date.minute)}";
   }
 
-  Future<void> _showImageProperties() async {
+  Future<void> _showProperties() async {
     try {
       final file = _currentImages[_currentIndex];
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
-      );
+      final isVideo = _isVideo(file);
 
       final stat = await file.stat();
       final sizeString = _formatFileSize(stat.size);
       final dateString = _formatDate(stat.modified);
+      final fileName = file.path.split('/').last;
+      final extension = fileName.split('.').last.toUpperCase();
+      String resolutionString = "";
+      String typeString = isVideo ? "Відео ($extension)" : "Фото ($extension)";
 
-      final buffer = await ui.ImmutableBuffer.fromFilePath(file.path);
-      final descriptor = await ui.ImageDescriptor.encoded(buffer);
-      final resolutionString = "${descriptor.width} x ${descriptor.height}";
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
+      }
 
-      descriptor.dispose();
-      buffer.dispose();
+      if (isVideo) {
+        VideoPlayerController? controller;
+        try {
+          controller = VideoPlayerController.file(file);
+          await controller.initialize();
+
+          if (controller.value.isInitialized) {
+            final size = controller.value.size;
+            if (size.width > 0 && size.height > 0) {
+              resolutionString = "${size.width.toInt()} x ${size.height.toInt()}";
+            }
+          }
+        } catch (e) {
+          debugPrint("Не вдалося отримати метадані відео: $e");
+        } finally {
+          await controller?.dispose();
+        }
+      } else {
+        try {
+          final buffer = await ui.ImmutableBuffer.fromFilePath(file.path);
+          final descriptor = await ui.ImageDescriptor.encoded(buffer);
+          resolutionString = "${descriptor.width} x ${descriptor.height}";
+          descriptor.dispose();
+          buffer.dispose();
+        } catch (e) {
+          debugPrint("Не вдалося отримати метадані фото: $e");
+        }
+      }
 
       if (!mounted) return;
-      context.pop();
+      if (context.canPop()) context.pop();
+
+      final typeDisplayValue = typeString;
 
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text(
             "Властивості",
-            textAlign: .center,
-            style: TextStyle(fontWeight: .w500),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.w500),
           ),
           content: Column(
-            mainAxisSize: .min,
-            crossAxisAlignment: .start,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildPropertyRow(Icons.image_aspect_ratio, "Розмір:", resolutionString),
+              if (resolutionString.isNotEmpty) ...[
+                _buildPropertyRow(Icons.image_aspect_ratio, "Розмір:", resolutionString),
+                const SizedBox(height: 12),
+              ],
+
+              _buildPropertyRow(
+                  isVideo ? Icons.videocam : Icons.image,
+                  "Тип:",
+                  typeDisplayValue
+              ),
+
               const SizedBox(height: 12),
               _buildPropertyRow(Icons.data_usage, "Вага:", sizeString),
               const SizedBox(height: 12),
               _buildPropertyRow(Icons.calendar_today, "Дата:", dateString),
               const SizedBox(height: 12),
-              _buildPropertyRow(Icons.folder_open, "Шлях:", file.path.split('/').last),
+              _buildPropertyRow(Icons.folder_open, "Ім'я:", fileName),
             ],
           ),
-          actionsAlignment: .center,
+          actionsAlignment: MainAxisAlignment.center,
           actions: [
             ElevatedButton(
               onPressed: () => context.pop(),
@@ -110,7 +157,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                 backgroundColor: context.colors.primary,
                 foregroundColor: context.colors.onPrimary,
                 elevation: 0,
-                padding: const .symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               ),
               child: const Text("ОК"),
             ),
@@ -119,7 +166,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
       );
     } catch (e) {
       if (mounted && context.canPop()) context.pop();
-      debugPrint("Помилка отримання властивостей: $e");
+      debugPrint("Критична помилка властивостей: $e");
     }
   }
 
@@ -157,15 +204,15 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text(
-          "Видалити фото?",
-          textAlign: .center,
-          style: TextStyle(fontWeight: .w500),
+          "Видалити файл?",
+          textAlign: TextAlign.center,
+          style: TextStyle(fontWeight: FontWeight.w500),
         ),
         content: const Text(
           "Цю дію не можна скасувати.",
-          textAlign: .center,
+          textAlign: TextAlign.center,
         ),
-        actionsAlignment: .center,
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(
             onPressed: () => context.pop(false),
@@ -244,7 +291,6 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     if (_currentImages.isEmpty) return const SizedBox();
@@ -265,7 +311,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
 
       body: PageView.builder(
         controller: _pageController,
-        allowImplicitScrolling: true,
+        allowImplicitScrolling: false,
         physics: _isZoomed
             ? const NeverScrollableScrollPhysics()
             : const BouncingScrollPhysics(),
@@ -277,32 +323,38 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
           });
         },
         itemBuilder: (context, index) {
-          return ZoomableImage(
-            file: _currentImages[index],
-            index: index,
-            currentIndex: _currentIndex,
-            onZoomStateChanged: (isZoomed) {
-              setState(() {
-                _isZoomed = isZoomed;
-              });
-            },
-            onPageForward: () {
-              if (_currentIndex < _currentImages.length - 1) {
-                _pageController.nextPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
-              }
-            },
-            onPageBack: () {
-              if (_currentIndex > 0) {
-                _pageController.previousPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
-              }
-            },
-          );
+          final file = _currentImages[index];
+
+          if (_isVideo(file)) {
+            return VideoPlayerItem(file: file);
+          } else {
+            return ZoomableImage(
+              file: file,
+              index: index,
+              currentIndex: _currentIndex,
+              onZoomStateChanged: (isZoomed) {
+                setState(() {
+                  _isZoomed = isZoomed;
+                });
+              },
+              onPageForward: () {
+                if (_currentIndex < _currentImages.length - 1) {
+                  _pageController.nextPage(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
+              },
+              onPageBack: () {
+                if (_currentIndex > 0) {
+                  _pageController.previousPage(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
+              },
+            );
+          }
         },
       ),
 
@@ -324,7 +376,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
                 tooltip: 'Поділитися',
               ),
               IconButton(
-                onPressed: _showImageProperties,
+                onPressed: _showProperties,
                 icon: const Icon(Icons.info_outline, color: Colors.white, size: 30),
                 tooltip: 'Властивості',
               ),

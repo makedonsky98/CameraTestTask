@@ -11,7 +11,10 @@ class CameraService {
   int _selectedCameraIndex = 0;
 
   CameraController? get controller => _controller;
+
   bool get isInitialized => _controller?.value.isInitialized ?? false;
+  bool get isRecordingVideo => _controller?.value.isRecordingVideo ?? false;
+  bool get isRecordingPaused => _controller?.value.isRecordingPaused ?? false;
   int get cameraCount => _cameras.length;
 
   Future<void> initialize() async {
@@ -43,6 +46,8 @@ class CameraService {
       );
 
       await _controller!.initialize();
+      await _controller!.prepareForVideoRecording();
+
     } catch (e) {
       debugPrint("CameraService init error: $e");
       rethrow;
@@ -55,20 +60,19 @@ class CameraService {
   }
 
   Future<void> switchCamera() async {
+    if (isRecordingVideo) return;
+
     if (_cameras.length < 2) return;
 
     final currentCamera = _cameras[_selectedCameraIndex];
     final currentDirection = currentCamera.lensDirection;
 
-    CameraLensDirection targetDirection;
+    CameraLensDirection targetDirection = currentDirection == CameraLensDirection.back
+        ? CameraLensDirection.front : CameraLensDirection.back;
 
-    if (currentDirection == CameraLensDirection.back) {
-      targetDirection = CameraLensDirection.front;
-    } else {
-      targetDirection = CameraLensDirection.back;
-    }
-
-    int newIndex = _cameras.indexWhere((c) => c.lensDirection == targetDirection);
+    int newIndex = _cameras.indexWhere(
+        (c) => c.lensDirection == targetDirection
+    );
 
     if (newIndex != -1) {
       _selectedCameraIndex = newIndex;
@@ -80,6 +84,8 @@ class CameraService {
   }
 
   Future<File?> takePicture() async {
+    if (isRecordingVideo) return null;
+
     final CameraController? cameraController = _controller;
 
     if (cameraController == null || !cameraController.value.isInitialized) {
@@ -92,16 +98,81 @@ class CameraService {
 
     try {
       final XFile image = await cameraController.takePicture();
-
-      final Directory appDir = await getApplicationDocumentsDirectory();
-      final String fileName = '${DateTime.now().toIso8601String().replaceAll(':', '-')}.jpg';
-      final String newPath = path.join(appDir.path, fileName);
-      await image.saveTo(newPath);
-
-      return File(newPath);
+      return await _saveFileToDocuments(image, 'jpg');
     } catch (e) {
       debugPrint("CameraService takePicture error: $e");
       return null;
     }
+  }
+
+  Future<void> startVideoRecording() async {
+    final CameraController? cameraController = _controller;
+
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (cameraController.value.isRecordingVideo) {
+      return;
+    }
+
+    try {
+      await cameraController.startVideoRecording();
+    } catch (e) {
+      debugPrint("CameraService startVideoRecording error: $e");
+    }
+  }
+
+  Future<File?> stopVideoRecording() async {
+    final CameraController? cameraController = _controller;
+
+    if (cameraController == null || !cameraController.value.isRecordingVideo) {
+      return null;
+    }
+
+    try {
+      final XFile video = await cameraController.stopVideoRecording();
+      return await _saveFileToDocuments(video, 'mp4');
+    } catch (e) {
+      debugPrint("CameraService stopVideoRecording error: $e");
+      return null;
+    }
+  }
+
+  Future<void> pauseVideoRecording() async {
+    final CameraController? cameraController = _controller;
+
+    if (cameraController == null || !cameraController.value.isRecordingVideo) {
+      return;
+    }
+
+    try {
+      await cameraController.pauseVideoRecording();
+    } catch (e) {
+      debugPrint("CameraService pauseVideoRecording error: $e");
+    }
+  }
+
+  Future<void> resumeVideoRecording() async {
+    final CameraController? cameraController = _controller;
+
+    if (cameraController == null || !cameraController.value.isRecordingVideo) {
+      return;
+    }
+
+    try {
+      await cameraController.resumeVideoRecording();
+    } catch (e) {
+      debugPrint("CameraService resumeVideoRecording error: $e");
+    }
+  }
+
+  Future<File> _saveFileToDocuments(XFile file, String extension) async {
+    final Directory appDir = await getApplicationDocumentsDirectory();
+    final String fileName = '${DateTime.now().toIso8601String().replaceAll(':', '-')}.$extension';
+    final String newPath = path.join(appDir.path, fileName);
+
+    await file.saveTo(newPath);
+    return File(newPath);
   }
 }
