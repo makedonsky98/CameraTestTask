@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui'; // Для FontFeature
 
 import 'package:camera/camera.dart' hide ImageFormat;
 import 'package:flutter/material.dart';
@@ -34,6 +33,10 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   bool _hasPermissions = false;
   bool _isLoading = true;
   bool _isRequesting = false;
+
+  String _loadingText = 'Запуск камери...';
+  bool _isNavigationInProgress = false;
+
   String _missingPermissionsText = '';
 
   File? _lastPhoto;
@@ -45,7 +48,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   bool _isShootingButtonDown = false;
   bool _showFlashEffect = false;
 
-  // --- ЗМІННІ ДЛЯ ТАЙМЕРА ---
   Timer? _videoTimer;
   int _recordDuration = 0;
   bool _isRedDotVisible = true;
@@ -68,7 +70,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.paused && !_isNavigationInProgress) {
       _stopTimer();
       _cameraService.dispose().then((_) {
         if (mounted) {
@@ -79,10 +81,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       });
     } else if (state == AppLifecycleState.resumed) {
       _updatePermissionStatus();
+
+      if (!_isCameraInitialized && _hasPermissions) {
+        _initCamera();
+      }
     }
   }
 
-  // --- МЕТОДИ ТАЙМЕРА ---
   void _startTimer() {
     _videoTimer?.cancel();
     _videoTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
@@ -143,6 +148,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     setState(() {
       _isLoading = true;
       _isRequesting = true;
+      _loadingText = 'Перевірка дозволів...';
     });
 
     final hasAccess = await _permissionService.requestSequentialPermissions();
@@ -165,8 +171,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final hasAccess = await _permissionService.checkStatusOnly();
     await _updateMissingDescription();
 
-    if (hasAccess && !_isCameraInitialized) await _initCamera();
-
     if (!mounted) return;
     setState(() => _hasPermissions = hasAccess);
   }
@@ -177,7 +181,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _initCamera() async {
-    setState(() => _isLoading = true);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _loadingText = 'Запуск камери...';
+    });
+
     try {
       await _cameraService.initialize();
       if (!mounted) return;
@@ -198,6 +207,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     setState(() {
       _isCameraInitialized = false;
       _isLoading = true;
+      _loadingText = 'Перемикання камери...';
     });
 
     await _cameraService.switchCamera();
@@ -246,6 +256,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _pickOverlayImage() async {
+    _isNavigationInProgress = true;
+
     try {
       final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
       if (pickedFile != null) {
@@ -255,6 +267,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       }
     } catch (e) {
       debugPrint("Error picking overlay: $e");
+    } finally {
+      _isNavigationInProgress = false;
     }
   }
 
@@ -263,9 +277,14 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   void _openGallery() {
+    _isNavigationInProgress = true;
+
     context.push(
       const LocalGalleryScreen(),
-    ).then((_) => _loadLastPhoto());
+    ).then((_) {
+      _isNavigationInProgress = false;
+      _loadLastPhoto();
+    });
   }
 
   Future<void> _startVideoRecording() async {
@@ -324,278 +343,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final controlPanelPaddingHorizontal = 16.0;
     final controlButtonsSize = 32.0;
 
-    if (_isLoading) {
-      return Center(
-        child: CircularProgressIndicator(
-          color: context.colors.primary,
-        ),
-      );
-    }
-
-    if (_hasPermissions) {
-      return Stack(
-        children: [
-          if (_isCameraInitialized && _cameraService.controller != null)
-            SizedBox.expand(
-              child: CameraPreview(_cameraService.controller!),
-            )
-          else
-            const Center(child: CircularProgressIndicator()),
-
-          if (_overlayImage != null)
-            Positioned.fill(
-              child: Opacity(
-                opacity: 0.2,
-                child: Image.file(
-                  _overlayImage!,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-
-          Positioned.fill(
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: _showFlashEffect ? 0.7 : 0.0,
-                duration: const Duration(milliseconds: 50),
-                child: Container(
-                  color: Colors.black,
-                ),
-              ),
-            ),
-          ),
-
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              child: Stack(
-                children: [
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                      height: controlPanelHeight,
-                      margin: EdgeInsets.only(
-                        top: 0,
-                        bottom: controlPanelPaddingBottom,
-                        left: controlPanelPaddingHorizontal,
-                        right: controlPanelPaddingHorizontal,
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(controlPanelHeight / 2),
-                      ),
-                      child: Row(
-                        children: [
-                          // --- ЛІВА ЧАСТИНА ---
-                          Expanded(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                // Слот 1: ТАЙМЕР або ЗМІНА КАМЕРИ
-                                if (_cameraService.isRecordingVideo)
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 10,
-                                        height: 10,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: (_isRedDotVisible && !_cameraService.isRecordingPaused)
-                                              ? Colors.red
-                                              : Colors.transparent,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        _formatDuration(_recordDuration),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                          fontFeatures: [FontFeature.tabularFigures()],
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                else if (_cameraService.cameraCount > 1)
-                                  IconButton(
-                                    onPressed: _switchCamera,
-                                    icon: Icon(
-                                      Icons.flip_camera_ios,
-                                      color: Colors.white,
-                                      size: controlButtonsSize,
-                                    ),
-                                  )
-                                else
-                                  SizedBox(width: controlButtonsSize),
-
-                                // Слот 2: ОВЕРЛЕЙ (логіка: доступний завжди, окрім запису БЕЗ оверлею)
-                                if (!_cameraService.isRecordingVideo || _overlayImage != null)
-                                  IconButton(
-                                    onPressed: _overlayImage == null ? _pickOverlayImage : _removeOverlay,
-                                    icon: Icon(
-                                      _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
-                                      color: Colors.white,
-                                      size: controlButtonsSize,
-                                    ),
-                                  )
-                                else
-                                  SizedBox(width: controlButtonsSize),
-                              ],
-                            ),
-                          ),
-
-                          SizedBox(width: shootingButtonSize),
-
-                          // --- ПРАВА ЧАСТИНА ---
-                          Expanded(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                // 1. Кнопка Відео/Стоп
-                                IconButton(
-                                  onPressed: _cameraService.isRecordingVideo
-                                      ? _stopVideoRecording
-                                      : _startVideoRecording,
-                                  icon: Icon(
-                                    _cameraService.isRecordingVideo
-                                        ? Icons.stop_rounded
-                                        : Icons.videocam,
-                                    color: Colors.white,
-                                    size: controlButtonsSize,
-                                  ),
-                                ),
-
-                                // 2. Галерея (Відображається завжди, але недоступна при записі)
-                                GestureDetector(
-                                  // Блокуємо натискання під час запису
-                                  onTap: _cameraService.isRecordingVideo ? null : _openGallery,
-                                  child: Opacity(
-                                    // Робимо напівпрозорою під час запису
-                                    opacity: _cameraService.isRecordingVideo ? 0.5 : 1.0,
-                                    child: _lastPhoto == null
-                                        ? Icon(Icons.photo_library, color: Colors.white, size: controlButtonsSize)
-                                        : Container(
-                                      width: controlButtonsSize,
-                                      height: controlButtonsSize,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.white, width: 2),
-                                        image: DecorationImage(
-                                          image: _lastVideoThumbnail != null
-                                              ? MemoryImage(_lastVideoThumbnail!) as ImageProvider
-                                              : ResizeImage(
-                                            FileImage(_lastPhoto!),
-                                            width: (controlButtonsSize * 3).toInt(),
-                                          ),
-                                          fit: BoxFit.cover,
-                                        ),
-                                      ),
-                                      child: _lastVideoThumbnail != null
-                                          ? const Center(
-                                        child: Icon(Icons.play_arrow_rounded,
-                                            color: Colors.white70, size: 20),
-                                      )
-                                          : null,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
-                      ),
-                      child: GestureDetector(
-                        onTapDown: (_) {
-                          if (!_cameraService.isRecordingVideo) {
-                            setState(() => _isShootingButtonDown = true);
-                          }
-                        },
-                        onTapUp: (_) {
-                          if (!_cameraService.isRecordingVideo) {
-                            setState(() => _isShootingButtonDown = false);
-                          }
-                        },
-                        onTapCancel: () {
-                          if (!_cameraService.isRecordingVideo) {
-                            setState(() => _isShootingButtonDown = false);
-                          }
-                        },
-                        onTap: _cameraService.isRecordingVideo
-                            ? _togglePauseVideo
-                            : _takePicture,
-
-                        child: AnimatedScale(
-                          scale: _isShootingButtonDown ? 0.95 : 1.0,
-                          duration: const Duration(milliseconds: 100),
-                          curve: Curves.easeInOut,
-                          child: Container(
-                            width: shootingButtonSize,
-                            height: shootingButtonSize,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _cameraService.isRecordingVideo
-                                  ? Colors.white
-                                  : context.colors.error,
-                              border: Border.all(
-                                  color: _cameraService.isRecordingVideo
-                                      ? Colors.white
-                                      : context.colors.onError,
-                                  width: 3
-                              ),
-                            ),
-                            child: Center(
-                              child: _cameraService.isRecordingVideo
-                                  ? Icon(
-                                _cameraService.isRecordingPaused
-                                    ? Icons.play_arrow_rounded
-                                    : Icons.pause_rounded,
-                                color: Colors.black,
-                                size: shootingButtonSize / 2,
-                              )
-                                  : null,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    else {
+    if (!_hasPermissions && !_isRequesting) {
       return SizedBox(
         width: double.infinity,
         height: double.infinity,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              color: context.colors.error,
-              size: 64,
-            ),
+            Icon(Icons.error_outline, color: context.colors.error, size: 64),
             Container(
               width: 0.8 * context.width,
-              margin: const EdgeInsets.only(
-                top: 16,
-                bottom: 24,
-              ),
+              margin: const EdgeInsets.only(top: 16, bottom: 24),
               child: Text.rich(
                 TextSpan(
                   text: 'Для роботи додатку потрібен доступ до: ',
@@ -608,10 +366,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                         color: context.colors.error,
                       ),
                     ),
-                    TextSpan(
-                      text: '.',
-                      style: context.text.bodyLarge,
-                    ),
+                    TextSpan(text: '.', style: context.text.bodyLarge),
                   ],
                 ),
                 textAlign: TextAlign.center,
@@ -628,5 +383,283 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         ),
       );
     }
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            child: _isCameraInitialized && _cameraService.controller != null && !_isLoading
+                ? SizedBox.expand(
+              key: ValueKey(_cameraService.controller!.description.lensDirection),
+              child: CameraPreview(_cameraService.controller!),
+            )
+                : Container(
+              key: const ValueKey('loading'),
+              color: Colors.black,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(color: context.colors.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      _loadingText,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        if (_overlayImage != null)
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.2,
+              child: Image.file(
+                _overlayImage!,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: _showFlashEffect ? 0.7 : 0.0,
+              duration: const Duration(milliseconds: 50),
+              child: Container(color: Colors.black),
+            ),
+          ),
+        ),
+
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    height: controlPanelHeight,
+                    margin: EdgeInsets.only(
+                      top: 0,
+                      bottom: controlPanelPaddingBottom,
+                      left: controlPanelPaddingHorizontal,
+                      right: controlPanelPaddingHorizontal,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(controlPanelHeight / 2),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              if (_cameraService.isRecordingVideo)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 10,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: (_isRedDotVisible && !_cameraService.isRecordingPaused)
+                                            ? Colors.red
+                                            : Colors.transparent,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _formatDuration(_recordDuration),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        fontFeatures: [FontFeature.tabularFigures()],
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              else if (_cameraService.cameraCount > 1)
+                                IconButton(
+                                  onPressed: _isLoading ? null : _switchCamera,
+                                  icon: Icon(
+                                    Icons.flip_camera_ios,
+                                    color: _isLoading ? Colors.white54 : Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                )
+                              else
+                                SizedBox(width: controlButtonsSize),
+
+                              if (!_cameraService.isRecordingVideo || _overlayImage != null)
+                                IconButton(
+                                  onPressed: _isLoading ? null : (_overlayImage == null ? _pickOverlayImage : _removeOverlay),
+                                  icon: Icon(
+                                    _overlayImage == null ? Icons.layers_outlined : Icons.layers_clear_outlined,
+                                    color: _isLoading ? Colors.white54 : Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                )
+                              else
+                                SizedBox(width: controlButtonsSize),
+                            ],
+                          ),
+                        ),
+
+                        SizedBox(width: shootingButtonSize),
+
+                        Expanded(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              if (_cameraService.isRecordingVideo) ...[
+                                IconButton(
+                                  onPressed: _stopVideoRecording,
+                                  icon: Icon(
+                                    Icons.stop_rounded,
+                                    color: Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                ),
+
+                                GestureDetector(
+                                  onTap: null,
+                                  child: Opacity(
+                                    opacity: 0.5,
+                                    child: _buildGalleryIcon(controlButtonsSize),
+                                  ),
+                                ),
+                              ] else ...[
+                                IconButton(
+                                  onPressed: _isLoading ? null : _startVideoRecording,
+                                  icon: Icon(
+                                    Icons.videocam,
+                                    color: _isLoading ? Colors.white54 : Colors.white,
+                                    size: controlButtonsSize,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: _isLoading ? null : _openGallery,
+                                  child: Opacity(
+                                    opacity: _isLoading ? 0.5 : 1.0,
+                                    child: _buildGalleryIcon(controlButtonsSize),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
+                    ),
+                    child: GestureDetector(
+                      onTapDown: (_) {
+                        if (!_cameraService.isRecordingVideo && !_isLoading) {
+                          setState(() => _isShootingButtonDown = true);
+                        }
+                      },
+                      onTapUp: (_) {
+                        if (!_cameraService.isRecordingVideo && !_isLoading) {
+                          setState(() => _isShootingButtonDown = false);
+                        }
+                      },
+                      onTapCancel: () {
+                        if (!_cameraService.isRecordingVideo && !_isLoading) {
+                          setState(() => _isShootingButtonDown = false);
+                        }
+                      },
+                      onTap: _isLoading
+                          ? null
+                          : (_cameraService.isRecordingVideo ? _togglePauseVideo : _takePicture),
+
+                      child: AnimatedScale(
+                        scale: _isShootingButtonDown ? 0.95 : 1.0,
+                        duration: const Duration(milliseconds: 100),
+                        curve: Curves.easeInOut,
+                        child: Container(
+                          width: shootingButtonSize,
+                          height: shootingButtonSize,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _cameraService.isRecordingVideo
+                                ? Colors.white
+                                : (_isLoading ? Colors.grey : context.colors.error),
+                            border: Border.all(
+                                color: _cameraService.isRecordingVideo
+                                    ? Colors.white
+                                    : (_isLoading ? Colors.grey : context.colors.onError),
+                                width: 3
+                            ),
+                          ),
+                          child: Center(
+                            child: _cameraService.isRecordingVideo
+                                ? Icon(
+                              _cameraService.isRecordingPaused
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.pause_rounded,
+                              color: Colors.black,
+                              size: shootingButtonSize / 2,
+                            )
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGalleryIcon(double size) {
+    if (_lastPhoto == null) {
+      return Icon(Icons.photo_library, color: Colors.white, size: size);
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white, width: 2),
+        image: DecorationImage(
+          image: _lastVideoThumbnail != null
+              ? MemoryImage(_lastVideoThumbnail!) as ImageProvider
+              : ResizeImage(
+            FileImage(_lastPhoto!),
+            width: (size * 3).toInt(),
+          ),
+          fit: BoxFit.cover,
+        ),
+      ),
+      child: _lastVideoThumbnail != null
+          ? const Center(
+        child: Icon(Icons.play_arrow_rounded,
+            color: Colors.white70, size: 20),
+      )
+          : null,
+    );
   }
 }
