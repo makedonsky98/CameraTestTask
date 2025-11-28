@@ -17,6 +17,7 @@ class CameraTestApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: Colors.blueAccent),
+        fontFamily: 'Inter',
         useMaterial3: true,
       ),
       home: const CameraScreen(title: 'Camera Test'),
