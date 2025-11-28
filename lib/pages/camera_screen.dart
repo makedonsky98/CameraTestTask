@@ -3,27 +3,28 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'local_gallery_screen.dart';
 import '../extensions/context_extension.dart';
 import '../services/permission_service.dart';
+import '../services/camera_service.dart';
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.title});
+class CameraScreen extends StatefulWidget {
+  const CameraScreen({
+    super.key,
+    required this.title
+  });
+
   final String title;
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
   final PermissionService _permissionService = PermissionService();
-  CameraController? _cameraController;
-
-  List<CameraDescription> _cameras = [];
-  int _selectedCameraIndex = 0;
+  final CameraService _cameraService = CameraService();
 
   bool _isCameraInitialized = false;
   bool _hasPermissions = false;
@@ -49,23 +50,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cameraController?.dispose();
+    _cameraService.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _cameraController;
-
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      cameraController?.dispose();
-
-      if (mounted) {
-        setState(() {
-          _isCameraInitialized = false;
-          _cameraController = null;
-        });
-      }
+      _cameraService.dispose().then((_) {
+        if (mounted) {
+          setState(() {
+            _isCameraInitialized = false;
+          });
+        }
+      });
     } else if (state == AppLifecycleState.resumed) {
       _updatePermissionStatus();
     }
@@ -83,6 +81,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await _updateMissingDescription();
 
     if (!mounted) return;
+
     if (hasAccess) await _initCamera();
 
     setState(() {
@@ -110,70 +109,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _initCamera() async {
+    setState(() => _isLoading = true);
     try {
-      if (_cameras.isEmpty) {
-        _cameras = await availableCameras();
-      }
-
-      if (_cameras.isEmpty) return;
-
-      if (_cameraController != null) {
-        await _cameraController!.dispose();
-      }
-
-      final camera = _cameras[_selectedCameraIndex];
-
-      final newController = CameraController(
-        camera,
-        ResolutionPreset.ultraHigh,
-        enableAudio: true,
-      );
-
-      _cameraController = newController;
-
-      await newController.initialize();
-
+      await _cameraService.initialize();
       if (!mounted) return;
-      setState(() => _isCameraInitialized = true);
-
+      setState(() {
+        _isCameraInitialized = true;
+        _isLoading = false;
+      });
     } catch (e) {
-      debugPrint("Camera error: $e");
+      debugPrint("Error initializing camera: $e");
+      if (!mounted) return;
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _switchCamera() async {
-    if (_cameras.length < 2) return;
+    // Перевірка на наявність камер тепер через сервіс
+    if (_cameraService.cameraCount < 2) return;
 
     setState(() {
       _isCameraInitialized = false;
-      _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras.length;
+      _isLoading = true;
     });
 
-    await _initCamera();
-  }
+    await _cameraService.switchCamera();
 
-  Future<void> _loadLastPhoto() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final List<FileSystemEntity> entities = dir.listSync();
-    final files = entities.whereType<File>().where((file) {
-      return file.path.endsWith('.jpg');
-    }).toList();
-
-    if (files.isNotEmpty) {
-      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
-
-      setState(() {
-        _lastPhoto = files.first;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _isCameraInitialized = true;
+      _isLoading = false;
+    });
   }
 
   Future<void> _takePicture() async {
-    final CameraController? cameraController = _cameraController;
+    if (!_cameraService.isInitialized) return;
 
-    if (cameraController == null || !cameraController.value.isInitialized) return;
-    if (cameraController.value.isTakingPicture) return;
-
+    // UI ефект спалаху
     setState(() {
       _showFlashEffect = true;
     });
@@ -186,26 +158,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     });
 
-    try {
-      final XFile image = await cameraController.takePicture();
-      final Directory appDir = await getApplicationDocumentsDirectory();
-      final String fileName = '${DateTime.now().toIso8601String().replaceAll(':', '-')}.jpg';
-      final String newPath = path.join(appDir.path, fileName);
+    final File? photo = await _cameraService.takePicture();
 
-      await image.saveTo(newPath);
-
+    if (photo != null && mounted) {
       setState(() {
-        _lastPhoto = File(newPath);
+        _lastPhoto = photo;
       });
-    } catch (e) {
-      debugPrint("Error taking picture: $e");
+    }
+  }
+
+  Future<void> _loadLastPhoto() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final List<FileSystemEntity> entities = dir.listSync();
+    final files = entities.whereType<File>().where((file) {
+      return file.path.endsWith('.jpg');
+    }).toList();
+
+    if (files.isNotEmpty) {
+      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      setState(() {
+        _lastPhoto = files.first;
+      });
     }
   }
 
   Future<void> _pickOverlayImage() async {
     try {
       final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
-
       if (pickedFile != null) {
         setState(() {
           _overlayImage = File(pickedFile.path);
@@ -217,9 +196,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _removeOverlay() {
-    setState(() {
-      _overlayImage = null;
-    });
+    setState(() => _overlayImage = null);
   }
 
   void _openGallery() {
@@ -258,9 +235,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_hasPermissions) {
       return Stack(
         children: [
-          if (_isCameraInitialized && _cameraController != null)
+          if (_isCameraInitialized && _cameraService.controller != null)
             SizedBox.expand(
-              child: CameraPreview(_cameraController!),
+              child: CameraPreview(_cameraService.controller!),
             )
           else
             const Center(child: CircularProgressIndicator()),
@@ -294,19 +271,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               child: Stack(
                 children: [
                   Align(
-                    alignment: .bottomCenter,
+                    alignment: Alignment.bottomCenter,
                     child: Container(
                       height: controlPanelHeight,
-                      margin: .only(
+                      margin: EdgeInsets.only(
                         top: 0,
                         bottom: controlPanelPaddingBottom,
                         left: controlPanelPaddingHorizontal,
                         right: controlPanelPaddingHorizontal,
                       ),
-                      padding: const .symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
                         color: Colors.black45,
-                        borderRadius: .circular(controlPanelHeight / 2),
+                        borderRadius: BorderRadius.circular(controlPanelHeight / 2),
                       ),
                       child: Row(
                         children: [
@@ -322,7 +299,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     size: controlButtonsSize,
                                   ),
                                 ),
-                                if (_cameras.length > 1)
+                                if (_cameraService.cameraCount > 1)
                                   IconButton(
                                     onPressed: _switchCamera,
                                     icon: Icon(
@@ -341,7 +318,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
                           Expanded(
                             child: Row(
-                              mainAxisAlignment: .spaceEvenly,
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
                                 IconButton(
                                   onPressed: () {},
@@ -359,15 +336,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                     width: controlButtonsSize,
                                     height: controlButtonsSize,
                                     decoration: BoxDecoration(
-                                      borderRadius: .circular(8),
+                                      borderRadius: BorderRadius.circular(8),
                                       image: DecorationImage(
                                         image: ResizeImage(
                                           FileImage(_lastPhoto!),
                                           width: (controlButtonsSize * 3).toInt(),
                                         ),
-                                        fit: .cover,
+                                        fit: BoxFit.cover,
                                       ),
-                                      border: .all(color: Colors.white, width: 2),
+                                      border: Border.all(color: Colors.white, width: 2),
                                     ),
                                   ),
                                 ),
@@ -380,10 +357,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ),
 
                   Align(
-                    alignment: .bottomCenter,
+                    alignment: Alignment.bottomCenter,
                     child: Padding(
-                      padding: .only(
-                          bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
+                      padding: EdgeInsets.only(
+                        bottom: controlPanelPaddingBottom - (shootingButtonSize - controlPanelHeight) / 2,
                       ),
                       child: GestureDetector(
                         onTapDown: (_) => setState(() => _isShootingButtonDown = true),
@@ -398,11 +375,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             width: shootingButtonSize,
                             height: shootingButtonSize,
                             decoration: BoxDecoration(
-                              shape: .circle,
+                              shape: BoxShape.circle,
                               color: context.colors.error,
-                              border: .all(color: context.colors.onError, width: 3),
+                              border: Border.all(color: context.colors.onError, width: 3),
                             ),
-                            child: null,
                           ),
                         ),
                       ),
@@ -417,10 +393,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     else {
       return SizedBox(
-        width: .infinity,
-        height: .infinity,
+        width: double.infinity,
+        height: double.infinity,
         child: Column(
-          mainAxisAlignment: .center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               Icons.error_outline,
@@ -429,7 +405,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             Container(
               width: 0.8 * context.width,
-              margin: const .only(
+              margin: const EdgeInsets.only(
                 top: 16,
                 bottom: 24,
               ),
@@ -441,7 +417,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     TextSpan(
                       text: _missingPermissionsText,
                       style: context.text.bodyLarge?.copyWith(
-                        fontWeight: .bold,
+                        fontWeight: FontWeight.bold,
                         color: context.colors.error,
                       ),
                     ),
@@ -451,7 +427,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
-                textAlign: .center,
+                textAlign: TextAlign.center,
               ),
             ),
             ElevatedButton.icon(

@@ -171,7 +171,7 @@ class _PhotoViewScreenState extends State<PhotoViewScreen> {
             onPressed: () => context.pop(false),
             style: TextButton.styleFrom(
               foregroundColor: context.colors.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              padding: const .symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text("Скасувати"),
           ),

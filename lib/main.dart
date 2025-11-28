@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '/pages/home_page.dart';
+import '/pages/camera_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +19,7 @@ class CameraTestApp extends StatelessWidget {
         colorScheme: .fromSeed(seedColor: Colors.blueAccent),
         useMaterial3: true,
       ),
-      home: const HomePage(title: 'Camera Test'),
+      home: const CameraScreen(title: 'Camera Test'),
     );
   }
 }
