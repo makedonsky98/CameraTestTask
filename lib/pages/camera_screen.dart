@@ -439,11 +439,18 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
         if (_overlayImage != null)
           Positioned.fill(
-            child: Opacity(
-              opacity: 0.2,
-              child: Image.file(
-                _overlayImage!,
-                fit: BoxFit.cover,
+            child: InteractiveViewer(
+              minScale: 0.1,
+              maxScale: 5.0,
+              boundaryMargin: const EdgeInsets.all(double.infinity),
+              child: Opacity(
+                opacity: 0.2,
+                child: Image.file(
+                  _overlayImage!,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
               ),
             ),
           ),
