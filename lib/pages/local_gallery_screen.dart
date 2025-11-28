@@ -3,48 +3,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../extensions/context_extension.dart';
+import '../services/media_cache.dart';
 import 'media_view_screen.dart';
-
-class _CacheEntry {
-  final Uint8List data;
-  final DateTime timestamp;
-
-  _CacheEntry({
-    required this.data,
-    required this.timestamp
-  });
-}
-
-Future<List<String>> _isolateLoadMedia(String directoryPath) async {
-  final dir = Directory(directoryPath);
-  final List<FileSystemEntity> entities = dir.listSync();
-
-  final mediaFiles = entities
-      .whereType<File>()
-      .where((file) {
-    final path = file.path.toLowerCase();
-    return path.endsWith('.jpg') || path.endsWith('.mp4');
-  })
-      .toList();
-
-  final Map<String, DateTime> fileDates = {};
-
-  for (var file in mediaFiles) {
-    final stat = file.statSync();
-    fileDates[file.path] = stat.modified;
-  }
-
-  mediaFiles.sort((a, b) {
-    final dateA = fileDates[a.path] ?? DateTime(1970);
-    final dateB = fileDates[b.path] ?? DateTime(1970);
-    return dateB.compareTo(dateA);
-  });
-
-  return mediaFiles.map((e) => e.path).toList();
-}
 
 class LocalGalleryScreen extends StatefulWidget {
   const LocalGalleryScreen({super.key});
@@ -57,9 +19,6 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
   List<File> _mediaFiles = [];
   bool _isLoading = true;
 
-  static final Map<String, _CacheEntry> _thumbnailCache = {};
-  static const Duration _cacheTtl = Duration(hours: 1);
-
   @override
   void initState() {
     super.initState();
@@ -68,7 +27,8 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
 
   Future<void> _loadMedia() async {
     final appDir = await getApplicationDocumentsDirectory();
-    final List<String> sortedPaths = await compute(_isolateLoadMedia, appDir.path);
+
+    final List<String> sortedPaths = await compute(isolateLoadMedia, appDir.path);
     final List<File> files = sortedPaths.map((path) => File(path)).toList();
 
     if (mounted) {
@@ -80,43 +40,16 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
   }
 
   void _openFullScreen(BuildContext context, int index) async {
-    await context.push(
+    final bool? shouldReload = await context.push(
       MediaViewScreen(
         images: _mediaFiles,
         initialIndex: index,
       ),
     );
 
-    _loadMedia();
-  }
-
-  Future<Uint8List?> _generateThumbnail(File file) async {
-    final now = DateTime.now();
-
-    if (_thumbnailCache.containsKey(file.path)) {
-      final entry = _thumbnailCache[file.path]!;
-      if (now.difference(entry.timestamp) < _cacheTtl) {
-        return entry.data;
-      } else {
-        _thumbnailCache.remove(file.path);
-      }
+    if (shouldReload == true) {
+      _loadMedia();
     }
-
-    final uint8list = await VideoThumbnail.thumbnailData(
-      video: file.path,
-      imageFormat: ImageFormat.JPEG,
-      maxWidth: 200,
-      quality: 50,
-    );
-
-    if (uint8list != null) {
-      _thumbnailCache[file.path] = _CacheEntry(
-          data: uint8list,
-          timestamp: now
-      );
-    }
-
-    return uint8list;
   }
 
   @override
@@ -131,13 +64,13 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _mediaFiles.isEmpty
-          ? Center(child: Text("Немає контенту", style: context.text.bodyLarge))
+          ? const Center(child: Text("Немає контенту"))
           : RawScrollbar(
         thumbVisibility: false,
         thumbColor: context.colors.inversePrimary.withValues(alpha: 0.7),
         radius: const Radius.circular(8),
         child: GridView.builder(
-          cacheExtent: 500,
+          cacheExtent: 1000,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             crossAxisSpacing: 2,
@@ -181,7 +114,7 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
           duration: const Duration(milliseconds: 200),
           child: frame != null
               ? child
-              : const Center(child: SizedBox()),
+              : const SizedBox(),
         );
       },
       errorBuilder: (context, error, stackTrace) {
@@ -193,31 +126,19 @@ class _LocalGalleryScreenState extends State<LocalGalleryScreen> {
   }
 
   Widget _buildVideoTile(File file) {
-    final cachedEntry = _thumbnailCache[file.path];
+    final cachedBytes = MediaCache.get(file.path);
 
-    if (cachedEntry != null) {
-      final isExpired = DateTime.now().difference(cachedEntry.timestamp) >= _cacheTtl;
-      if (!isExpired) {
-        return _buildVideoContent(cachedEntry.data);
-      }
+    if (cachedBytes != null) {
+      return _buildVideoContent(cachedBytes);
     }
 
     return FutureBuilder<Uint8List?>(
-      future: _generateThumbnail(file),
+      future: MediaCache.getOrGenerate(file),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.done && snapshot.data != null) {
           return _buildVideoContent(snapshot.data!);
         } else {
-          return Container(
-            color: Colors.grey[300],
-            child: const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-          );
+          return Container(color: Colors.grey[300]);
         }
       },
     );

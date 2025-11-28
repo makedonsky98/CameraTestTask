@@ -332,6 +332,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         centerTitle: true,
         title: Text(widget.title),
       ),
+      backgroundColor: Colors.black,
       body: _buildBodyContent(context),
     );
   }
@@ -387,30 +388,49 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     return Stack(
       children: [
         Positioned.fill(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            transitionBuilder: (Widget child, Animation<double> animation) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            child: _isCameraInitialized && _cameraService.controller != null && !_isLoading
-                ? SizedBox.expand(
-              key: ValueKey(_cameraService.controller!.description.lensDirection),
-              child: CameraPreview(_cameraService.controller!),
-            )
-                : Container(
-              key: const ValueKey('loading'),
-              color: Colors.black,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(color: context.colors.primary),
-                    const SizedBox(height: 16),
-                    Text(
-                      _loadingText,
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                    ),
+          child: Container(
+            color: Colors.black,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  alignment: Alignment.center,
+                  children: <Widget>[
+                    ...previousChildren,
+                    if (currentChild != null) currentChild,
                   ],
+                );
+              },
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: _isCameraInitialized && _cameraService.controller != null && !_isLoading
+                  ? SizedBox.expand(
+                key: ValueKey(_cameraService.controller!.description.lensDirection),
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _cameraService.controller!.value.previewSize!.height,
+                    height: _cameraService.controller!.value.previewSize!.width,
+                    child: CameraPreview(_cameraService.controller!),
+                  ),
+                ),
+              )
+                  : Container(
+                key: const ValueKey('loading'),
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(color: context.colors.primary),
+                      const SizedBox(height: 16),
+                      Text(
+                        _loadingText,
+                        style: const TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -532,7 +552,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                     size: controlButtonsSize,
                                   ),
                                 ),
-
                                 GestureDetector(
                                   onTap: null,
                                   child: Opacity(

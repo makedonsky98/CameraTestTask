@@ -28,6 +28,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
   late int _currentIndex;
   late List<File> _currentImages;
   bool _isZoomed = false;
+  bool _wasModified = false;
 
   @override
   void initState() {
@@ -63,7 +64,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
         "${twoDigits(date.hour)}:${twoDigits(date.minute)}";
   }
 
-  Future<void> _showProperties() async {
+  Future<void> _showImageProperties() async {
     try {
       final file = _currentImages[_currentIndex];
       final isVideo = _isVideo(file);
@@ -73,6 +74,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
       final dateString = _formatDate(stat.modified);
       final fileName = file.path.split('/').last;
       final extension = fileName.split('.').last.toUpperCase();
+
       String resolutionString = "";
       String typeString = isVideo ? "Відео ($extension)" : "Фото ($extension)";
 
@@ -116,7 +118,9 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
       if (!mounted) return;
       if (context.canPop()) context.pop();
 
-      final typeDisplayValue = typeString;
+      final typeDisplayValue = resolutionString.isNotEmpty
+          ? "$typeString, $resolutionString"
+          : typeString;
 
       showDialog(
         context: context,
@@ -130,7 +134,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (resolutionString.isNotEmpty) ...[
+              if (!isVideo && resolutionString.isNotEmpty) ...[
                 _buildPropertyRow(Icons.image_aspect_ratio, "Розмір:", resolutionString),
                 const SizedBox(height: 12),
               ],
@@ -172,18 +176,18 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
 
   Widget _buildPropertyRow(IconData icon, String label, String value) {
     return Row(
-      crossAxisAlignment: .start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Icon(icon, size: 20, color: Colors.grey[600]),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
-            crossAxisAlignment: .start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 label,
                 style: const TextStyle(
-                  fontWeight: .w500,
+                  fontWeight: FontWeight.w500,
                   fontSize: 12,
                   color: Colors.grey,
                 ),
@@ -218,7 +222,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
             onPressed: () => context.pop(false),
             style: TextButton.styleFrom(
               foregroundColor: context.colors.primary,
-              padding: const .symmetric(horizontal: 20, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text("Скасувати"),
           ),
@@ -228,7 +232,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
               backgroundColor: context.colors.error,
               foregroundColor: context.colors.onError,
               elevation: 0,
-              padding: const .symmetric(horizontal: 20, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text("Видалити"),
           ),
@@ -247,6 +251,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
 
       setState(() {
         _currentImages.removeAt(_currentIndex);
+        _wasModified = true;
 
         if (_currentIndex >= _currentImages.length) {
           _currentIndex = _currentImages.length - 1;
@@ -254,7 +259,7 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
       });
 
       if (_currentImages.isEmpty) {
-        if (mounted) context.pop();
+        if (mounted) context.pop(true);
       }
     } catch (e) {
       debugPrint("Помилка видалення: $e");
@@ -295,97 +300,104 @@ class _MediaViewScreenState extends State<MediaViewScreen> {
   Widget build(BuildContext context) {
     if (_currentImages.isEmpty) return const SizedBox();
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
-      extendBody: true,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        context.pop(_wasModified);
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        extendBodyBehindAppBar: true,
+        extendBody: true,
 
-      appBar: AppBar(
-        backgroundColor: Colors.black.withValues(alpha: 0.5),
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
-          "${_currentIndex + 1} з ${_currentImages.length}",
-          style: const TextStyle(color: Colors.white),
+        appBar: AppBar(
+          backgroundColor: Colors.black.withValues(alpha: 0.5),
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: Text(
+            "${_currentIndex + 1} з ${_currentImages.length}",
+            style: const TextStyle(color: Colors.white),
+          ),
         ),
-      ),
 
-      body: PageView.builder(
-        controller: _pageController,
-        allowImplicitScrolling: false,
-        physics: _isZoomed
-            ? const NeverScrollableScrollPhysics()
-            : const BouncingScrollPhysics(),
-        itemCount: _currentImages.length,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-            _isZoomed = false;
-          });
-        },
-        itemBuilder: (context, index) {
-          final file = _currentImages[index];
+        body: PageView.builder(
+          controller: _pageController,
+          allowImplicitScrolling: false,
+          physics: _isZoomed
+              ? const NeverScrollableScrollPhysics()
+              : const BouncingScrollPhysics(),
+          itemCount: _currentImages.length,
+          onPageChanged: (index) {
+            setState(() {
+              _currentIndex = index;
+              _isZoomed = false;
+            });
+          },
+          itemBuilder: (context, index) {
+            final file = _currentImages[index];
 
-          if (_isVideo(file)) {
-            return VideoPlayerItem(file: file);
-          } else {
-            return ZoomableImage(
-              file: file,
-              index: index,
-              currentIndex: _currentIndex,
-              onZoomStateChanged: (isZoomed) {
-                setState(() {
-                  _isZoomed = isZoomed;
-                });
-              },
-              onPageForward: () {
-                if (_currentIndex < _currentImages.length - 1) {
-                  _pageController.nextPage(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                  );
-                }
-              },
-              onPageBack: () {
-                if (_currentIndex > 0) {
-                  _pageController.previousPage(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                  );
-                }
-              },
-            );
-          }
-        },
-      ),
-
-      bottomNavigationBar: Container(
-        color: Colors.black.withValues(alpha: 0.5),
-        padding: const .symmetric(vertical: 10, horizontal: 20),
-        child: SafeArea(
-          child: Row(
-            mainAxisAlignment: .spaceAround,
-            children: [
-              IconButton(
-                onPressed: () async {
-                  final file = _currentImages[_currentIndex];
-                  await _shareContent(
-                    file: XFile(file.path),
-                  );
+            if (_isVideo(file)) {
+              return VideoPlayerItem(file: file);
+            } else {
+              return ZoomableImage(
+                file: file,
+                index: index,
+                currentIndex: _currentIndex,
+                onZoomStateChanged: (isZoomed) {
+                  setState(() {
+                    _isZoomed = isZoomed;
+                  });
                 },
-                icon: const Icon(Icons.share, color: Colors.white, size: 30),
-                tooltip: 'Поділитися',
-              ),
-              IconButton(
-                onPressed: _showProperties,
-                icon: const Icon(Icons.info_outline, color: Colors.white, size: 30),
-                tooltip: 'Властивості',
-              ),
-              IconButton(
-                onPressed: _deletePhoto,
-                icon: const Icon(Icons.delete_outline, color: Colors.white, size: 30),
-                tooltip: 'Видалити',
-              ),
-            ],
+                onPageForward: () {
+                  if (_currentIndex < _currentImages.length - 1) {
+                    _pageController.nextPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                },
+                onPageBack: () {
+                  if (_currentIndex > 0) {
+                    _pageController.previousPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                },
+              );
+            }
+          },
+        ),
+
+        bottomNavigationBar: Container(
+          color: Colors.black.withValues(alpha: 0.5),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+          child: SafeArea(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                IconButton(
+                  onPressed: () async {
+                    final file = _currentImages[_currentIndex];
+                    await _shareContent(
+                      file: XFile(file.path),
+                    );
+                  },
+                  icon: const Icon(Icons.share, color: Colors.white, size: 30),
+                  tooltip: 'Поділитися',
+                ),
+                IconButton(
+                  onPressed: _showImageProperties,
+                  icon: const Icon(Icons.info_outline, color: Colors.white, size: 30),
+                  tooltip: 'Властивості',
+                ),
+                IconButton(
+                  onPressed: _deletePhoto,
+                  icon: const Icon(Icons.delete_outline, color: Colors.white, size: 30),
+                  tooltip: 'Видалити',
+                ),
+              ],
+            ),
           ),
         ),
       ),
